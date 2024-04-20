@@ -1,0 +1,56 @@
+//+------------------------------------------------------------------+
+//|                                             HedgingStrategy.mq4  |
+//|                        Copyright 2021, MetaQuotes Software Corp. |
+//|                                       http://www.metaquotes.net/ |
+//+------------------------------------------------------------------+
+input double current_loss = 0.0;
+input double minimum_distance = 3.0; // Minimum profit to start trailing stop
+input double trailing_H_SL = 1.0; // Trailing stop loss when profit is above $5
+input double H_stop_loss = -5.0; // Hard stop loss when no sufficient profit
+
+int OnInit() {
+  // Initialization code
+  return(INIT_SUCCEEDED);
+}
+
+void OnTick() {
+  // Main trading logic executed on every new tick
+  for (int i = 0; i < OrdersTotal(); i++) {
+    if (OrderSelect(i, SELECT_BY_POS) && OrderType() <= OP_SELL) {
+      double orderProfit = OrderProfit();
+      if (orderProfit < -5.0) {
+        int ticket = OpenOppositeOrder(OrderType(), OrderLots());
+        ManageHedgeOrder(ticket);
+      }
+    }
+  }
+}
+
+int OpenOppositeOrder(int type, double lots) {
+  int oppositeType = (type == OP_BUY) ? OP_SELL : OP_BUY;
+  double price = (oppositeType == OP_BUY) ? Ask : Bid;
+  int ticket = OrderSend(Symbol(), oppositeType, lots, price, 2, 0, 0, "Hedge Order", 0, 0, clrNONE);
+  return ticket;
+}
+
+void ManageHedgeOrder(int ticket) {
+  if (OrderSelect(ticket, SELECT_BY_TICKET)) {
+    double openPrice = OrderOpenPrice();
+    double currentPrice = (OrderType() == OP_BUY) ? Ask : Bid;
+    double profit = (OrderType() == OP_BUY) ? (currentPrice - openPrice) * OrderLots() * 100000 : (openPrice - currentPrice) * OrderLots() * 100000;
+
+    if (profit >= minimum_distance) {
+      // Apply trailing stop logic
+      double newStopLoss = (OrderType() == OP_BUY) ? (currentPrice - trailing_H_SL / 100000) : (currentPrice + trailing_H_SL / 100000);
+      OrderModify(OrderTicket(), OrderOpenPrice(), newStopLoss, OrderTakeProfit(), 0, clrNONE);
+    } else if (profit < 0 && profit > H_stop_loss) {
+      // Apply hard stop loss
+      double newStopLoss = (OrderType() == OP_BUY) ? (openPrice + H_stop_loss / 100000) : (openPrice - H_stop_loss / 100000);
+      OrderModify(OrderTicket(), OrderOpenPrice(), newStopLoss, OrderTakeProfit(), 0, clrNONE);
+    }
+  }
+}
+
+void OnDeinit(const int reason) {
+  // Clean-up code if needed
+}
